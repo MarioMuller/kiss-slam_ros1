@@ -81,6 +81,17 @@ roslaunch kiss_slam_ros run_kiss_slam.launch cloud_topic:=/velodyne_points
 The launch file exposes `cloud_topic`, `frame_id`, and `config` as arguments so
 they can be tuned at runtime.
 
+### Running with a rosbag
+
+Use `run_kiss_slam_bag.launch` to automatically play a rosbag and start the
+KISS-SLAM node:
+
+```bash
+roslaunch kiss_slam_ros run_kiss_slam_bag.launch \
+  bag_file:=/rosbags/landmark_s1/ros1_s1_1.bag \
+  cloud_topic:=/ouster/points
+```
+
 ## Citation
 If you use this library for any academic work, please cite our original paper:
 ```bib

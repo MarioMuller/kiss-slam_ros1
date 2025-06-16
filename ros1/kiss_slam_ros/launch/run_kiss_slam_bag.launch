@@ -1,0 +1,16 @@
+<launch>
+  <arg name="bag_file" default="/rosbags/landmark_s1/ros1_s1_1.bag" />
+  <arg name="cloud_topic" default="/ouster/points" />
+  <arg name="frame_id" default="map" />
+  <arg name="config" default="" />
+
+  <param name="use_sim_time" value="true" />
+
+  <node pkg="rosbag" type="play" name="rosbag_play" args="--clock $(arg bag_file)" output="screen" />
+
+  <node pkg="kiss_slam_ros" type="kiss_slam_node.py" name="kiss_slam" output="screen">
+    <param name="pointcloud_topic" value="$(arg cloud_topic)" />
+    <param name="frame_id" value="$(arg frame_id)" />
+    <param name="config" value="$(arg config)" />
+  </node>
+</launch>
