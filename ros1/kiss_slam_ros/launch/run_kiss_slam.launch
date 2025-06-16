@@ -1,0 +1,11 @@
+<launch>
+  <arg name="cloud_topic" default="/points" />
+  <arg name="frame_id" default="map" />
+  <arg name="config" default="" />
+
+  <node pkg="kiss_slam_ros" type="kiss_slam_node.py" name="kiss_slam" output="screen">
+    <param name="pointcloud_topic" value="$(arg cloud_topic)" />
+    <param name="frame_id" value="$(arg frame_id)" />
+    <param name="config" value="$(arg config)" />
+  </node>
+</launch>

@@ -60,6 +60,27 @@ cd kiss-slam
 make editable
 ```
 
+## ROS1 Usage
+Build and source a catkin workspace:
+
+```
+mkdir -p ~/catkin_ws/src
+cd ~/catkin_ws/src
+git clone https://github.com/PRBonn/kiss-slam.git
+cd ..
+catkin_make
+source devel/setup.bash
+```
+
+Launch the node:
+
+```
+roslaunch kiss_slam_ros run_kiss_slam.launch cloud_topic:=/velodyne_points
+```
+
+The launch file exposes `cloud_topic`, `frame_id`, and `config` as arguments so
+they can be tuned at runtime.
+
 ## Citation
 If you use this library for any academic work, please cite our original paper:
 ```bib
