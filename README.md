@@ -79,7 +79,8 @@ roslaunch kiss_slam_ros run_kiss_slam.launch cloud_topic:=/velodyne_points
 ```
 
 The launch file exposes `cloud_topic`, `frame_id`, and `config` as arguments so
-they can be tuned at runtime.
+they can be tuned at runtime.  If `config` is left empty, the node now falls
+back to the default configuration bundled with the library.
 
 ## Citation
 If you use this library for any academic work, please cite our original paper:
