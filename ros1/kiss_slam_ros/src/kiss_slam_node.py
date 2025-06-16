@@ -2,10 +2,10 @@
 
 import numpy as np
 import rospy
-from sensor_msgs.msg import PointCloud2
+import tf.transformations as tf_trans
 from geometry_msgs.msg import PoseArray, PoseStamped
 from sensor_msgs import point_cloud2
-import tf.transformations as tf_trans
+from sensor_msgs.msg import PointCloud2
 
 from kiss_slam.pipeline import SlamPipeline
 
@@ -14,6 +14,8 @@ class KissSlamNode:
     def __init__(self):
         cloud_topic = rospy.get_param("~pointcloud_topic", "/points")
         config = rospy.get_param("~config", None)
+        if isinstance(config, str) and config.strip() == "":
+            config = None
         self.frame_id = rospy.get_param("~frame_id", "map")
 
         self.pipeline = SlamPipeline(dataset=None, config_file=config)
@@ -25,10 +27,12 @@ class KissSlamNode:
         self.trajectory = []
 
     def callback(self, msg: PointCloud2):
-        points = np.array([
-            [p[0], p[1], p[2]]
-            for p in point_cloud2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True)
-        ])
+        points = np.array(
+            [
+                [p[0], p[1], p[2]]
+                for p in point_cloud2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True)
+            ]
+        )
         timestamps = np.zeros(points.shape[0])
         self.pipeline.kiss_slam.process_scan(points, timestamps)
 
