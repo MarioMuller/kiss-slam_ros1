@@ -7,7 +7,8 @@ from geometry_msgs.msg import PoseArray, PoseStamped
 from sensor_msgs import point_cloud2
 import tf.transformations as tf_trans
 
-from kiss_slam.pipeline import SlamPipeline
+from kiss_slam.config import load_config
+from kiss_slam.slam import KissSLAM
 
 
 class KissSlamNode:
@@ -16,7 +17,8 @@ class KissSlamNode:
         config = rospy.get_param("~config", None)
         self.frame_id = rospy.get_param("~frame_id", "map")
 
-        self.pipeline = SlamPipeline(dataset=None, config_file=config)
+        slam_config = load_config(config)
+        self.kiss_slam = KissSLAM(slam_config)
 
         self.pose_pub = rospy.Publisher("~pose", PoseStamped, queue_size=1)
         self.poses_pub = rospy.Publisher("~poses", PoseArray, queue_size=10)
@@ -25,15 +27,19 @@ class KissSlamNode:
         self.trajectory = []
 
     def callback(self, msg: PointCloud2):
+        print("test1")
         points = np.array([
             [p[0], p[1], p[2]]
             for p in point_cloud2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True)
         ])
-        timestamps = np.zeros(points.shape[0])
-        self.pipeline.kiss_slam.process_scan(points, timestamps)
 
-        T = self.pipeline.kiss_slam.odometry.last_pose
+        print(points)
+
+        self.kiss_slam.process_scan(points, np.empty((0,)))
+
+        T = self.kiss_slam.odometry.last_pose
         self.publish_pose(T, msg.header.stamp)
+        print("test3")
 
     def publish_pose(self, T: np.ndarray, stamp):
         pose = PoseStamped()
