@@ -5,7 +5,7 @@ import rospy
 from sensor_msgs.msg import PointCloud2
 from geometry_msgs.msg import PoseArray, PoseStamped
 from sensor_msgs import point_cloud2
-from std_msgs.msg import Header
+from std_msgs.msg import Header, Bool
 from std_srvs.srv import Trigger, TriggerResponse
 import tf.transformations as tf_trans
 import open3d as o3d
@@ -28,23 +28,37 @@ class KissSlamNode:
         self.map_pub = rospy.Publisher(
             "~global_map", PointCloud2, queue_size=1, latch=True
         )
+        self.closure_pub = rospy.Publisher("~loop_closure", Bool, queue_size=10)
         self.sub = rospy.Subscriber(
             cloud_topic, PointCloud2, self.callback, queue_size=1
         )
         self.save_srv = rospy.Service("~save_map", Trigger, self.handle_save_map)
 
         self.trajectory = []
+        self.last_closure_count = 0
 
     def callback(self, msg: PointCloud2):
-        points = np.array([
-            [p[0], p[1], p[2]]
-            for p in point_cloud2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True)
+        points_and_times = np.array([
+            [p[0], p[1], p[2], p[3]]
+            for p in point_cloud2.read_points(msg, field_names=("x", "y", "z", "t"), skip_nans=True)
         ])
+
+        points = points_and_times[:, :3]
+        timestamps = points_and_times[:, 3]
 
         self.kiss_slam.process_scan(points, np.empty((0,)))
 
+        # Check for new loop closures and notify
+        closures = len(self.kiss_slam.get_closures())
+        if closures > self.last_closure_count:
+            rospy.loginfo("KissSLAM: Loop closure detected")
+            self.closure_pub.publish(True)
+        else:
+            self.closure_pub.publish(False)
+        self.last_closure_count = closures
+
         # Publish updated global map if a new local map was created
-        self.publish_global_map()
+        # self.publish_global_map()
 
         T = self.kiss_slam.odometry.last_pose
         self.publish_pose(T, msg.header.stamp)
