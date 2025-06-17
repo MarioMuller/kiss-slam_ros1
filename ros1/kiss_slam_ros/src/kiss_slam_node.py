@@ -5,7 +5,10 @@ import rospy
 from sensor_msgs.msg import PointCloud2
 from geometry_msgs.msg import PoseArray, PoseStamped
 from sensor_msgs import point_cloud2
+from std_msgs.msg import Header
+from std_srvs.srv import Trigger, TriggerResponse
 import tf.transformations as tf_trans
+import open3d as o3d
 
 from kiss_slam.config import load_config
 from kiss_slam.slam import KissSLAM
@@ -22,24 +25,29 @@ class KissSlamNode:
 
         self.pose_pub = rospy.Publisher("~pose", PoseStamped, queue_size=1)
         self.poses_pub = rospy.Publisher("~poses", PoseArray, queue_size=10)
-        self.sub = rospy.Subscriber(cloud_topic, PointCloud2, self.callback, queue_size=1)
+        self.map_pub = rospy.Publisher(
+            "~global_map", PointCloud2, queue_size=1, latch=True
+        )
+        self.sub = rospy.Subscriber(
+            cloud_topic, PointCloud2, self.callback, queue_size=1
+        )
+        self.save_srv = rospy.Service("~save_map", Trigger, self.handle_save_map)
 
         self.trajectory = []
 
     def callback(self, msg: PointCloud2):
-        print("test1")
         points = np.array([
             [p[0], p[1], p[2]]
             for p in point_cloud2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True)
         ])
 
-        print(points)
-
         self.kiss_slam.process_scan(points, np.empty((0,)))
+
+        # Publish updated global map if a new local map was created
+        self.publish_global_map()
 
         T = self.kiss_slam.odometry.last_pose
         self.publish_pose(T, msg.header.stamp)
-        print("test3")
 
     def publish_pose(self, T: np.ndarray, stamp):
         pose = PoseStamped()
@@ -62,6 +70,40 @@ class KissSlamNode:
         pa.header.frame_id = self.frame_id
         pa.poses = self.trajectory
         self.poses_pub.publish(pa)
+
+    def compute_global_map(self) -> np.ndarray:
+        points = []
+        for node in self.kiss_slam.local_map_graph.local_maps():
+            if node.pcd is None:
+                continue
+            local_pts = node.pcd.point.positions.numpy()
+            pts = local_pts @ node.keypose[:3, :3].T + node.keypose[:3, 3]
+            points.append(pts)
+
+        current_pts = self.kiss_slam.voxel_grid.point_cloud()
+        if current_pts.size != 0:
+            keypose = self.kiss_slam.local_map_graph.last_keypose
+            pts = current_pts @ keypose[:3, :3].T + keypose[:3, 3]
+            points.append(pts)
+
+        if not points:
+            return np.empty((0, 3), np.float32)
+        return np.concatenate(points, axis=0)
+
+    def publish_global_map(self):
+        points = self.compute_global_map()
+        header = Header()
+        header.stamp = rospy.Time.now()
+        header.frame_id = self.frame_id
+        cloud = point_cloud2.create_cloud_xyz32(header, points)
+        self.map_pub.publish(cloud)
+
+    def handle_save_map(self, req):
+        output = rospy.get_param("~map_output", "/tmp/kiss_slam_map.pcd")
+        points = self.compute_global_map()
+        pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
+        o3d.io.write_point_cloud(output, pcd)
+        return TriggerResponse(success=True, message=f"Saved map to {output}")
 
 
 def main():
