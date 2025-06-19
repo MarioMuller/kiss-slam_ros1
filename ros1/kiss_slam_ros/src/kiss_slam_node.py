@@ -5,7 +5,6 @@ import rospy
 from sensor_msgs.msg import PointCloud2
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs import point_cloud2
-from std_msgs.msg import Bool
 from std_srvs.srv import Trigger, TriggerResponse
 import tf.transformations as tf_trans
 import open3d as o3d
@@ -25,11 +24,8 @@ class KissSlamNode:
         self.kiss_slam = KissSLAM(slam_config)
 
         self.pose_pub = rospy.Publisher("~pose", PoseStamped, queue_size=1)
-        self.closure_pub = rospy.Publisher("~loop_closure", Bool, queue_size=10)
         self.sub = rospy.Subscriber(cloud_topic, PointCloud2, self.callback, queue_size=1)
         self.save_srv = rospy.Service("~save_map", Trigger, self.handle_save_map)
-
-        self.last_closure_count = 0
 
     def callback(self, msg: PointCloud2):
         points_iter = point_cloud2.read_points(
@@ -42,19 +38,11 @@ class KissSlamNode:
         points = points_and_times[:, :3]
         timestamps = points_and_times[:, 3]
 
-        self.kiss_slam.process_scan(points, np.empty((0,))) #timestamps provides worse performance
+        self.kiss_slam.process_scan(points, timestamps)
 
-        # Check for new loop closures and notify
-        closures = len(self.kiss_slam.get_closures())
-        if closures > self.last_closure_count:
-            rospy.loginfo("KissSLAM: Loop closure detected")
-            self.closure_pub.publish(True)
-        else:
-            self.closure_pub.publish(False)
-        self.last_closure_count = closures
-
-        T = self.kiss_slam.odometry.last_pose
-        self.publish_pose(T, msg.header.stamp)
+        keypose = self.kiss_slam.local_map_graph.last_keypose
+        T_global = keypose @ self.kiss_slam.odometry.last_pose
+        self.publish_pose(T_global, msg.header.stamp)
 
     def publish_pose(self, T: np.ndarray, stamp):
         pose = PoseStamped()
@@ -91,7 +79,7 @@ class KissSlamNode:
         return np.concatenate(points, axis=0)
 
     def handle_save_map(self, req):
-        output = rospy.get_param("~map_output", "/tmp/kiss_slam_map.pcd")
+        output = rospy.get_param("~map_output", "/tmp/s1_1_kiss.pcd")
         points = self.compute_global_map()
         pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
         o3d.io.write_point_cloud(output, pcd)
