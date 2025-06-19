@@ -2,16 +2,65 @@
 
 import numpy as np
 import rospy
-from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import PointCloud2, PointField
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs import point_cloud2
 from std_srvs.srv import Trigger, TriggerResponse
 import tf.transformations as tf_trans
 import open3d as o3d
-import itertools
 
 from kiss_slam.config import load_config
 from kiss_slam.slam import KissSLAM
+
+
+def pointcloud2_to_numpy(msg: PointCloud2):
+    """Convert a ``PointCloud2`` message into numpy arrays."""
+    if hasattr(point_cloud2, "read_points_numpy"):
+        data = point_cloud2.read_points_numpy(
+            msg, field_names=("x", "y", "z", "t"), skip_nans=True
+        )
+        return data[:, :3], data[:, 3]
+
+    dtype_mappings = {
+        PointField.INT8: np.int8,
+        PointField.UINT8: np.uint8,
+        PointField.INT16: np.int16,
+        PointField.UINT16: np.uint16,
+        PointField.INT32: np.int32,
+        PointField.UINT32: np.uint32,
+        PointField.FLOAT32: np.float32,
+        PointField.FLOAT64: np.float64,
+    }
+
+    byte_order = ">" if msg.is_bigendian else "<"
+    dtype_list = []
+    offset = 0
+    for field in msg.fields:
+        while offset < field.offset:
+            dtype_list.append((f"_pad{offset}", byte_order + "u1"))
+            offset += 1
+        base_dtype = np.dtype(dtype_mappings[field.datatype])
+        field_dtype = base_dtype.newbyteorder(byte_order)
+        if field.count == 1:
+            dtype_list.append((field.name, field_dtype))
+        else:
+            dtype_list.append((field.name, field_dtype, (field.count,)))
+        offset += base_dtype.itemsize * field.count
+
+    while offset < msg.point_step:
+        dtype_list.append((f"_pad{offset}", byte_order + "u1"))
+        offset += 1
+
+    dtype = np.dtype(dtype_list)
+    points_data = np.frombuffer(msg.data, dtype=dtype)
+
+    x = points_data["x"].astype(np.float32)
+    y = points_data["y"].astype(np.float32)
+    z = points_data["z"].astype(np.float32)
+    t = points_data["t"].astype(np.float32)
+
+    mask = ~(np.isnan(x) | np.isnan(y) | np.isnan(z))
+    return np.stack((x[mask], y[mask], z[mask]), axis=-1), t[mask]
 
 
 class KissSlamNode:
@@ -28,15 +77,7 @@ class KissSlamNode:
         self.save_srv = rospy.Service("~save_map", Trigger, self.handle_save_map)
 
     def callback(self, msg: PointCloud2):
-        points_iter = point_cloud2.read_points(
-            msg, field_names=("x", "y", "z", "t"), skip_nans=True
-        )
-        points_and_times = np.fromiter(
-            itertools.chain.from_iterable(points_iter), dtype=np.float32
-        ).reshape(-1, 4)
-
-        points = points_and_times[:, :3]
-        timestamps = points_and_times[:, 3]
+        points, timestamps = pointcloud2_to_numpy(msg)
 
         self.kiss_slam.process_scan(points, timestamps)
 
