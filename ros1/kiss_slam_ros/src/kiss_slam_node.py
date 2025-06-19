@@ -1,17 +1,48 @@
 #!/usr/bin/env python3
 
 import numpy as np
+import open3d as o3d
 import rospy
-from sensor_msgs.msg import PointCloud2
+import tf.transformations as tf_trans
 from geometry_msgs.msg import PoseArray, PoseStamped
 from sensor_msgs import point_cloud2
-from std_msgs.msg import Header, Bool
+from sensor_msgs.msg import PointCloud2
+from std_msgs.msg import Bool, Header
 from std_srvs.srv import Trigger, TriggerResponse
-import tf.transformations as tf_trans
-import open3d as o3d
 
 from kiss_slam.config import load_config
 from kiss_slam.slam import KissSLAM
+
+
+def cloud_to_xyz_t(msg: PointCloud2) -> np.ndarray:
+    """Convert ``msg`` into an ``(N, 4)`` ``float32`` array with ``x``/``y``/``z``/``t``.
+
+    The routine bypasses ``read_points`` for performance by directly reading the
+    raw buffer. If the cloud does not contain a ``t`` field, the returned column
+    is filled with zeros. Big-endian clouds are not supported.
+    """
+
+    if msg.is_bigendian:
+        raise ValueError("Big-endian PointCloud2 not supported")
+
+    field_map = {f.name: f for f in msg.fields}
+    for name in ("x", "y", "z"):
+        if name not in field_map:
+            raise ValueError(f"Missing required field '{name}'")
+
+    step_floats = msg.point_step // 4
+    cloud = np.frombuffer(msg.data, dtype=np.float32).reshape(-1, step_floats)
+
+    idx = [field_map[name].offset // 4 for name in ("x", "y", "z")]
+    xyz = cloud[:, idx]
+
+    if "t" in field_map:
+        t_idx = field_map["t"].offset // 4
+        t = cloud[:, t_idx][:, np.newaxis]
+    else:
+        t = np.zeros((xyz.shape[0], 1), dtype=np.float32)
+
+    return np.concatenate((xyz, t), axis=1)
 
 
 class KissSlamNode:
@@ -25,26 +56,18 @@ class KissSlamNode:
 
         self.pose_pub = rospy.Publisher("~pose", PoseStamped, queue_size=1)
         self.poses_pub = rospy.Publisher("~poses", PoseArray, queue_size=10)
-        self.map_pub = rospy.Publisher(
-            "~global_map", PointCloud2, queue_size=1, latch=True
-        )
+        self.map_pub = rospy.Publisher("~global_map", PointCloud2, queue_size=1, latch=True)
         self.closure_pub = rospy.Publisher("~loop_closure", Bool, queue_size=10)
-        self.sub = rospy.Subscriber(
-            cloud_topic, PointCloud2, self.callback, queue_size=1
-        )
+        self.sub = rospy.Subscriber(cloud_topic, PointCloud2, self.callback, queue_size=1)
         self.save_srv = rospy.Service("~save_map", Trigger, self.handle_save_map)
 
         self.trajectory = []
         self.last_closure_count = 0
 
     def callback(self, msg: PointCloud2):
-        points_and_times = np.array([
-            [p[0], p[1], p[2], p[3]]
-            for p in point_cloud2.read_points(msg, field_names=("x", "y", "z", "t"), skip_nans=True)
-        ])
+        points_and_times = cloud_to_xyz_t(msg)
 
         points = points_and_times[:, :3]
-        timestamps = points_and_times[:, 3]
 
         self.kiss_slam.process_scan(points, timestamps)
 
