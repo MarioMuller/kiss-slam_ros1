@@ -42,7 +42,7 @@ class KissSlamNode:
         points = points_and_times[:, :3]
         timestamps = points_and_times[:, 3]
 
-        self.kiss_slam.process_scan(points, np.empty((0,))) #timestamps provides worse performance
+        self.kiss_slam.process_scan(points, np.empty((0,)))  # timestamps provides worse performance
 
         # Check for new loop closures and notify
         closures = len(self.kiss_slam.get_closures())
@@ -53,8 +53,14 @@ class KissSlamNode:
             self.closure_pub.publish(False)
         self.last_closure_count = closures
 
-        T = self.kiss_slam.odometry.last_pose
-        self.publish_pose(T, msg.header.stamp)
+        # Publish the **global** pose. The odometry keeps track of the pose
+        # relative to the current submap and resets to identity whenever a new
+        # submap is created. To avoid publishing poses that jump back to the
+        # origin after each split, we compose the odometry pose with the
+        # keypose of the current submap which stores its global location.
+        keypose = self.kiss_slam.local_map_graph.last_keypose
+        T_global = keypose @ self.kiss_slam.odometry.last_pose
+        self.publish_pose(T_global, msg.header.stamp)
 
     def publish_pose(self, T: np.ndarray, stamp):
         pose = PoseStamped()
