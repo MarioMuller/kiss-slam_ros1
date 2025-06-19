@@ -46,7 +46,7 @@ class KissSlamNode:
         points = points_and_times[:, :3]
         timestamps = points_and_times[:, 3]
 
-        self.kiss_slam.process_scan(points, np.empty((0,)))
+        self.kiss_slam.process_scan(points, timestamps)
 
         # Check for new loop closures and notify
         closures = len(self.kiss_slam.get_closures())
